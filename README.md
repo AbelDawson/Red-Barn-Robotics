@@ -16,11 +16,21 @@ Agricultural robots often encounter dynamic environments — objects may tempora
 
 ## ✅ Features
 
-- 🔁 Persistent object tracking using object position and motion
+- 🔁 Persistent object tracking using object position and motion 
 - 🧠 Handles temporary disappearance of objects (up to 1–3 frames)
 - 🖼️ Visualizes tracked objects and their history
 - 📦 Fully containerized (Docker) with a single entrypoint
 - 📝 MIT licensed for open contribution and reuse
+
+## 🔧 Implementation Notes
+
+- Written in **Rust** for performance and robustness
+- Uses **IoU (Intersection over Union)** for object association between frames
+  - Tracked objects are matched with current detections by maximizing IoU scores
+  - Objects are considered matched if their IoU exceeds a defined threshold (e.g., 0.3)
+  - If a detection does not match any existing track, it starts a new ID
+- The system allows objects to disappear for up to **3 frames** before a track is terminated
+- Tracking logic ensures that reappearing objects in a similar position retain their original ID
 
 ---
 
