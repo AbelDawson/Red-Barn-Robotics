@@ -1,54 +1,85 @@
-use crop_tracking_system::tracker::Tracker;
-use crop_tracking_system::detection;
-use crop_tracking_system::visualize;
 
-use std::{fs::File, path::PathBuf};
-use clap::Parser;
-use serde::Deserialize;
+use rand::Rng;
+use serde::Serialize;
+use std::{fs::File, io::Write};
 
-#[derive(Parser)]
-struct Args {
-    #[arg(long)]
-    input: PathBuf,
-    #[arg(long)]
-    output: PathBuf,
-    #[arg(long)]
-    vis_dir: Option<PathBuf>,
+#[derive(Serialize)]
+struct Detection {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
 }
 
-#[derive(Debug, Deserialize)]
-struct FrameInput {
+#[derive(Serialize)]
+struct Frame {
     frame_id: u32,
     timestamp: String,
-    detections: Vec<detection::Detection>,
+    detections: Vec<Detection>,
 }
 
 fn main() -> anyhow::Result<()> {
-    let args = Args::parse();
+    let mut rng = rand::thread_rng();
+    let mut frames = Vec::new();
+    let total_frames = 1000;
+    let num_objects = 50;
 
+    // Initial positions
+    let mut positions: Vec<(f32, f32)> = (0..num_objects)
+        .map(|_| (rng.gen_range(0.1..0.9), rng.gen_range(0.1..0.9)))
+        .collect();
 
-    println!("Starting reding in frames");
-    let input_file = File::open(args.input)?;
-    let frames: Vec<FrameInput> = serde_json::from_reader(input_file)?;
-
-    println!("Starting! {:?}", frames[0]);
-
-    let mut tracker = Tracker::new(3, 0.3);
-    let mut output_frames = Vec::new();
-
-    for frame in frames {
-        let result = tracker.update(frame.frame_id, &frame.timestamp, &frame.detections);
-
-        if let Some(vis_path) = &args.vis_dir {
-            std::fs::create_dir_all(vis_path)?;
-            visualize::render_frame(frame.frame_id, &result.tracked_objects, vis_path)?;
+    // Disappearance map: Vec<Vec<bool>> where map[obj_id][frame_id] = true => present
+    let mut present_map = vec![vec![true; total_frames]; num_objects];
+    for obj_id in 0..num_objects {
+        let mut f = 0;
+        while f < total_frames {
+            if rng.gen_bool(0.05) { // 5% chance to disappear
+                let miss_len = rng.gen_range(1..=2);
+                for i in 0..miss_len {
+                    if f + i < total_frames {
+                        present_map[obj_id][f + i] = false;
+                    }
+                }
+                f += miss_len;
+            } else {
+                f += 1;
+            }
         }
-
-        output_frames.push(result);
     }
 
-    let out_file = File::create(args.output)?;
-    serde_json::to_writer_pretty(out_file, &output_frames)?;
+    for frame_id in 0..total_frames {
+        let timestamp = format!("2025-03-24T18:{:02}:{:02}.000000", frame_id / 60, frame_id % 60);
+        let mut detections = Vec::new();
 
+        for (obj_id, pos) in positions.iter_mut().enumerate() {
+            if present_map[obj_id][frame_id] {
+                let jitter_x = rng.gen_range(-0.01..0.01);
+                let jitter_y = rng.gen_range(-0.01..0.01);
+                pos.0 = (pos.0 + jitter_x).clamp(0.0, 1.0);
+                pos.1 = (pos.1 + jitter_y).clamp(0.0, 1.0);
+
+                detections.push(Detection {
+                    x: pos.0,
+                    y: pos.1,
+                    width: 0.05,
+                    height: 0.05,
+                });
+            }
+        }
+
+
+        frames.push(Frame {
+            frame_id: frame_id as u32,
+            timestamp,
+            detections,
+        });
+    }
+
+    let mut file = File::create("input_data.json")?;
+    let json = serde_json::to_string_pretty(&frames)?;
+    file.write_all(json.as_bytes())?;
+    println!("✅ Generated input_data.json with {} frames.", total_frames);
     Ok(())
 }
+
